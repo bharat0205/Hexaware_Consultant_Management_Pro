@@ -7,15 +7,14 @@ const ConsultantDashboard = () => {
     const [selectedConsultant, setSelectedConsultant] = useState(null);
     const [resumeFile, setResumeFile] = useState(null);
     const [uploadMessage, setUploadMessage] = useState('');
-    const [skillVector, setSkillVector] = useState('');
     const [feedback, setFeedback] = useState('');
-    const formatSkills = (skills) => {
-    if (!skills) return "";
-    return skills
-        .replace(/technical_skills:/i, "\n\n<b>Technical_skills:</b>")
-        .replace(/soft_skills:/i, "\n\n<b>Soft_skills:</b>")
-        .trim();
-    };
+
+    // --- CHANGED: State to handle new backend response ---
+    const [keywords, setKeywords] = useState('Python, React, Flask, SQL, Leadership'); // Example keywords
+    const [analysisResult, setAnalysisResult] = useState(null);
+
+    // --- REMOVED: The old formatSkills function is no longer needed. ---
+
     const calculateProgress = (consultant) => {
         let progress = 0;
         if (consultant.resume_status === "Updated") progress += 25;
@@ -36,6 +35,10 @@ const ConsultantDashboard = () => {
         setSelectedId(id);
         const consultant = consultants.find(c => c.id === parseInt(id));
         setSelectedConsultant(consultant);
+        // Reset analysis when changing consultant
+        setAnalysisResult(null);
+        setUploadMessage('');
+        setFeedback('');
     };
 
     const updateConsultant = (field, value) => {
@@ -54,16 +57,24 @@ const ConsultantDashboard = () => {
         });
     };
 
+    // --- CHANGED: Logic to send keywords and handle the new response ---
     const handleResumeFileSubmit = () => {
         if (!resumeFile) {
-            setUploadMessage("❌ Please select a PDF file first.");
+            setUploadMessage("❌ Please select a file first.");
+            return;
+        }
+        if (!keywords.trim()) {
+            setUploadMessage("❌ Please enter some keywords to check for.");
             return;
         }
 
         const formData = new FormData();
         formData.append('file', resumeFile);
+        formData.append('keywords', keywords); // Add keywords to the request
 
-        setUploadMessage("✅ Resume submitted. Processing...");
+        setUploadMessage("✅ Analyzing resume...");
+        setAnalysisResult(null); // Clear previous results
+        setFeedback('');
 
         fetch('http://localhost:5000/upload_resume', {
             method: 'POST',
@@ -71,25 +82,29 @@ const ConsultantDashboard = () => {
         })
         .then(res => res.json())
         .then(data => {
-            if (data.skill_vector) {
-                setSkillVector(data.skill_vector);
-                setUploadMessage("✅ Resume submitted and analyzed successfully.");
-            } else if (data.error) {
-                setSkillVector(`❌ Error: ${data.error}`);
-                setUploadMessage("❌ Error occurred during processing.");
+            if (data.error) {
+                setUploadMessage(`❌ Error: ${data.error}`);
+            } else {
+                setAnalysisResult(data); // Store the entire result object
+                setUploadMessage("✅ Analysis complete.");
             }
         })
         .catch(err => {
-            setSkillVector(`❌ Error: ${err.message}`);
-            setUploadMessage("❌ Error occurred during processing.");
+            setUploadMessage(`❌ Error: ${err.message}`);
         });
     };
 
+    // --- CHANGED: Logic to send found_keywords for feedback ---
     const generateFeedback = () => {
+        if (!analysisResult || !analysisResult.found_keywords) {
+            setFeedback('Cannot generate feedback without an analysis result.');
+            return;
+        }
+
         fetch('http://localhost:5000/generate_feedback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ skills: skillVector })
+            body: JSON.stringify({ found_keywords: analysisResult.found_keywords })
         })
         .then(res => res.json())
         .then(data => {
@@ -112,83 +127,58 @@ const ConsultantDashboard = () => {
 
             {selectedConsultant && (
                 <div>
+                    {/* Status cards and progress bar remain the same */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', marginTop: '20px' }}>
                         <StatusCard title="Resume Status" value={selectedConsultant.resume_status} color="blue" />
                         <StatusCard title="Attendance" value={selectedConsultant.attendance} color="green" />
                         <StatusCard title="Opportunities" value={selectedConsultant.opportunities} color="orange" />
                         <StatusCard title="Training" value={selectedConsultant.training} color="purple" />
                     </div>
-
+                    {/* Buttons remain the same */}
                     <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px' }}>
-                        <button onClick={() => updateConsultant('resume_status', 'Updated')}>Mark Resume as Updated</button>
-                        <button onClick={() => updateConsultant('attendance', 'Completed')}>Mark Attendance as Completed</button>
-                        <button onClick={() => updateConsultant('opportunities', selectedConsultant.opportunities + 1)}>Add Opportunity</button>
-                        <button onClick={() => updateConsultant('training', 'Completed')}>Mark Training as Completed</button>
-                    </div>
-
-                    <div style={{ marginTop: '30px' }}>
-                        <h3>Workflow Progress</h3>
-                        <div style={{ 
-                            backgroundColor: '#ddd', 
-                            borderRadius: '20px', 
-                            height: '25px', 
-                            width: '80%', 
-                            margin: 'auto',
-                            overflow: 'hidden',
-                            position: 'relative'
-                        }}>
-                            <div style={{
-                                height: '100%',
-                                width: `${calculateProgress(selectedConsultant)}%`,
-                                backgroundColor: '#4caf50',
-                                transition: 'width 0.5s',
-                                textAlign: 'center',
-                                color: 'white',
-                                lineHeight: '25px',
-                                fontWeight: 'bold'
-                            }}>
-                                {calculateProgress(selectedConsultant)}%
-                            </div>
-                        </div>
+                         <button onClick={() => updateConsultant('resume_status', 'Updated')}>Mark Resume as Updated</button>
+                         <button onClick={() => updateConsultant('attendance', 'Completed')}>Mark Attendance as Completed</button>
+                         <button onClick={() => updateConsultant('opportunities', selectedConsultant.opportunities + 1)}>Add Opportunity</button>
+                         <button onClick={() => updateConsultant('training', 'Completed')}>Mark Training as Completed</button>
                     </div>
 
                     <div style={{ marginTop: '40px' }}>
-                        <h3>Upload Resume (PDF)</h3>
+                        <h3>Upload & Analyze Resume</h3>
+                        {/* --- NEW: Input for keywords --- */}
+                        <div>
+                            <label htmlFor="keywords">Keywords to look for (comma-separated):</label>
+                            <br />
+                            <input
+                                id="keywords"
+                                type="text"
+                                value={keywords}
+                                onChange={(e) => setKeywords(e.target.value)}
+                                style={{ width: '50%', padding: '8px', marginTop: '5px', marginBottom: '15px' }}
+                            />
+                        </div>
+
                         <input
                             type="file"
-                            accept="application/pdf"
+                            accept=".pdf, .docx" // Also accept docx files
                             onChange={(e) => setResumeFile(e.target.files[0])}
                         />
                         <br />
-                        <button
-                            onClick={handleResumeFileSubmit}
-                            style={{ marginTop: '10px', padding: '10px 15px' }}
-                        >
+                        <button onClick={handleResumeFileSubmit} style={{ marginTop: '10px', padding: '10px 15px' }}>
                             Submit Resume for Analysis
                         </button>
                         <div style={{ marginTop: '10px', fontWeight: 'bold', color: uploadMessage.includes("❌") ? 'red' : 'green' }}>
                             {uploadMessage}
                         </div>
 
-                        {skillVector && (
-                            <div style={{ marginTop: '20px', textAlign: 'left', display: 'inline-block', maxWidth: '600px' }}>
-                                <h4>Extracted Skills:</h4>
-                                <div style={{ 
-                                    backgroundColor: '#e6f7ff', 
-                                    padding: '15px', 
-                                    borderRadius: '8px', 
-                                    whiteSpace: 'pre-wrap', 
-                                    fontFamily: 'monospace',
-                                    textAlign: 'left',
-                                    color: 'black'
-                                }}>
-                                    <span dangerouslySetInnerHTML={{ __html: formatSkills(skillVector) }}></span>
-                                </div>
+                        {/* --- CHANGED: Display for new analysis result --- */}
+                        {analysisResult && (
+                            <div style={{ marginTop: '20px', textAlign: 'left', display: 'inline-block', maxWidth: '600px', backgroundColor: '#e6f7ff', padding: '15px', borderRadius: '8px', color: 'black' }}>
+                                <h4>Analysis Result:</h4>
+                                <p><strong>Match Score:</strong> {analysisResult.match_score_percent}%</p>
+                                <p><strong>Found Keywords:</strong> {analysisResult.found_keywords.length > 0 ? analysisResult.found_keywords.join(', ') : 'None'}</p>
+                                
                                 <div style={{ marginTop: '15px', textAlign: 'center' }}>
-                                    <button
-                                        onClick={generateFeedback}
-                                        style={{ padding: '10px 20px' }}
-                                    >
+                                    <button onClick={generateFeedback} style={{ padding: '10px 20px' }}>
                                         Generate Personalized Feedback
                                     </button>
                                 </div>
@@ -196,15 +186,7 @@ const ConsultantDashboard = () => {
                         )}
 
                         {feedback && (
-                            <div style={{
-                                backgroundColor: '#f0f0f0',
-                                padding: '15px',
-                                borderRadius: '8px',
-                                marginTop: '20px',
-                                textAlign: 'left',
-                                maxWidth: '600px',
-                                display: 'inline-block'
-                            }}>
+                            <div style={{ backgroundColor: '#f0f0f0', padding: '15px', borderRadius: '8px', marginTop: '20px', textAlign: 'left', maxWidth: '600px', display: 'inline-block', color: 'black' }}>
                                 <strong>Personalized Feedback:</strong>
                                 <p>{feedback}</p>
                             </div>
