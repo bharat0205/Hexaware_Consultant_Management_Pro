@@ -5,13 +5,20 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
+from dotenv import load_dotenv
 from models import db, Consultant
 
-# ✅ Gemini API Key
-os.environ["GEMINI_API_KEY"] = "AIzaSyA7lctcuV6WsvUflnFqClJeHhuzfWZ9-DM"
-genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+# ✅ Load environment variables
+load_dotenv()
 
-# ✅ Ensure resume folder
+# ✅ Gemini API Keys from .env
+GEMINI_KEYS = [
+    os.getenv("GEMINI_PRIMARY_KEY"),
+    os.getenv("GEMINI_BACKUP_KEY1"),
+    os.getenv("GEMINI_BACKUP_KEY2"),
+]
+
+# ✅ Ensure resumes folder
 if not os.path.exists("resumes"):
     os.makedirs("resumes")
 
@@ -49,7 +56,7 @@ def login():
         return jsonify({"success": True, "consultant_id": consultant.id, "name": consultant.name})
     return jsonify({"success": False, "error": "Invalid email or password"}), 401
 
-# ✅ Get Consultants (with filters)
+# ✅ Get Consultants
 @app.route("/consultants", methods=["GET"])
 def get_consultants():
     name_filter = request.args.get('name', '').lower()
@@ -67,7 +74,7 @@ def get_consultants():
             filtered.append(c.to_dict())
     return jsonify(filtered)
 
-# ✅ Update Consultant Fields
+# ✅ Update Consultant
 @app.route("/consultants/<int:id>", methods=["PUT"])
 def update_consultant(id):
     data = request.json
@@ -81,7 +88,7 @@ def update_consultant(id):
         return jsonify(consultant.to_dict())
     return jsonify({"error": "Consultant not found"}), 404
 
-# ✅ Upload Resume and Analyze
+# ✅ Upload Resume
 @app.route("/upload_resume", methods=["POST"])
 def upload_resume():
     try:
@@ -100,9 +107,13 @@ def upload_resume():
         if file.filename == '':
             return jsonify({"error": "No selected file"}), 400
 
+        print("📁 File received:", file.filename)
+
+        # ✅ Save the file
         filepath = os.path.join("resumes", file.filename)
         file.save(filepath)
 
+        # ✅ Extract text from PDF
         with pdfplumber.open(filepath) as pdf:
             text = ''
             for page in pdf.pages:
@@ -113,6 +124,7 @@ def upload_resume():
         if not text.strip():
             return jsonify({"error": "No text extracted from PDF."}), 400
 
+        # ✅ Gemini prompt
         prompt = f"""
 From the following resume, extract two clean, comma-separated lists:
 1) technical_skills: only skill names relevant to technical work (no ratings).
@@ -124,26 +136,27 @@ Resume:
 {text[:3000]}
         """
 
-        try:
-            print("🔍 Using Gemini 1.5")
-            model = genai.GenerativeModel('gemini-1.5-pro-latest')
-            response = model.generate_content(prompt)
-            skill_text = response.text
-        except Exception as e:
-            print("⚠️ Gemini 1.5 failed:", e)
-            print("🔄 Trying Gemini 2.5")
-            model = genai.GenerativeModel('gemini-2.5-pro')
-            response = model.generate_content(prompt)
-            skill_text = response.text
+        # ✅ Try Gemini API Keys in order
+        from google.generativeai import GenerativeModel
 
-        # ✅ Save upload date
-        consultant.resume_upload_date = datetime.utcnow()
-        db.session.commit()
+        for i, key in enumerate(GEMINI_KEYS, start=1):
+            try:
+                print(f"🧠 Trying Gemini Key {i}")
+                genai.configure(api_key=key)
+                model = GenerativeModel('gemini-1.5-pro-latest')  # You can change this if needed
+                response = model.generate_content(prompt)
+                if response.text.strip():
+                    consultant.resume_upload_date = datetime.utcnow()
+                    db.session.commit()
+                    return jsonify({"skill_vector": response.text.strip()})
+            except Exception as e:
+                print(f"⚠️ Gemini Key {i} failed:", e)
 
-        return jsonify({"skill_vector": skill_text})
+        return jsonify({"error": "All Gemini APIs failed to extract skills."}), 500
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print("🚨 Unexpected Error:", e)
+        return jsonify({"error": "Error occurred during processing."}), 500
 
 # ✅ Get Resume File
 @app.route("/get_resume/<filename>", methods=["GET"])
@@ -154,16 +167,31 @@ def get_resume(filename):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ✅ Generate AI Feedback
+# ✅ Generate Feedback
 @app.route("/generate_feedback", methods=["POST"])
 def generate_feedback():
     try:
         data = request.json
         skills = data.get('skills', '')
+
         prompt = f"""You are an AI career coach. Based on these skills:\n{skills}\nGive a short, personalized feedback."""
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        response = model.generate_content(prompt)
-        return jsonify({"feedback": response.text})
+
+        from google.generativeai import GenerativeModel
+
+        for i, key in enumerate(GEMINI_KEYS, start=1):
+            try:
+                print(f"🧠 Trying Gemini Key {i} for feedback")
+                genai.configure(api_key=key)
+                model = GenerativeModel('gemini-1.5-pro-latest')
+                response = model.generate_content(prompt)
+                feedback_text = response.text.strip()
+                if feedback_text:
+                    return jsonify({"feedback": feedback_text})
+            except Exception as e:
+                print(f"⚠️ Feedback generation failed with key {i}:\n", e)
+
+        return jsonify({"feedback": "❌ Error: All Gemini APIs failed to generate feedback."}), 500
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
