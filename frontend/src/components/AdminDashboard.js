@@ -1,121 +1,120 @@
 import React, { useEffect, useState } from 'react';
-import { saveAs } from 'file-saver';
+import { Tab, Tabs, Box, Paper, Typography, TextField, Button, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, IconButton, Tooltip } from '@mui/material';
+import SchoolIcon from '@mui/icons-material/School'; // Training icon
 
 const AdminDashboard = () => {
     const [consultants, setConsultants] = useState([]);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('');
-    const [attendanceFilter, setAttendanceFilter] = useState('');
-    const [trainingFilter, setTrainingFilter] = useState('');
+    const [currentTab, setCurrentTab] = useState(0);
+
+    // --- NEW AI SHORTLISTING STATE ---
+    const [searchQuery, setSearchQuery] = useState('');
+    const [shortlistResult, setShortlistResult] = useState(null);
+    const [listTab, setListTab] = useState(0); // For switching between matching/not matching
 
     useEffect(() => {
-        fetch('http://localhost:5000/consultants')
-            .then(res => res.json())
-            .then(data => setConsultants(data));
+        fetch('http://localhost:5000/consultants').then(res => res.json()).then(data => setConsultants(data));
     }, []);
 
-    const filteredConsultants = consultants.filter(c =>
-        c.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-        (statusFilter ? c.resume_status === statusFilter : true) &&
-        (attendanceFilter ? c.attendance === attendanceFilter : true) &&
-        (trainingFilter ? c.training === trainingFilter : true)
-    );
+    const handleTabChange = (event, newValue) => setCurrentTab(newValue);
+    const handleListTabChange = (event, newValue) => setListTab(newValue);
 
-    const generateReport = () => {
-        const csvContent = [
-            ["ID", "Name", "Resume Status", "Attendance", "Opportunities", "Training"],
-            ...filteredConsultants.map(c => [
-                c.id,
-                c.name,
-                c.resume_status,
-                c.attendance,
-                c.opportunities,
-                c.training
-            ])
-        ].map(e => e.join(",")).join("\n");
-
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, 'consultant_report.csv');
+    const handleShortlist = () => {
+        fetch('http://localhost:5000/admin/shortlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: searchQuery })
+        })
+        .then(res => res.json())
+        .then(data => setShortlistResult(data));
     };
 
-    return (
-        <div style={{ padding: '20px', textAlign: 'center', backgroundColor: 'black', color: 'white', minHeight: '100vh' }}>
-            <h2>Admin Dashboard</h2>
+    const handleAssignTraining = (consultantId) => {
+        fetch(`http://localhost:5000/consultants/${consultantId}/assign_training`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ skill: searchQuery }) // Assign training for the searched skill
+        })
+        .then(res => res.json())
+        .then(updatedConsultant => {
+            // Update the UI to show the training has been assigned
+            setShortlistResult(prev => ({
+                ...prev,
+                not_matching: prev.not_matching.map(c => 
+                    c.id === consultantId ? { ...c, training: updatedConsultant.training } : c
+                )
+            }));
+            alert(`${updatedConsultant.name} has been assigned training for: ${searchQuery}`);
+        });
+    };
 
-            {/* 🔍 Search Input */}
-            <input
-                type="text"
-                placeholder="Search by name..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ padding: '10px', width: '60%', marginBottom: '20px' }}
-            />
-
-            {/* 📊 Column Filters */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '20px' }}>
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-                    <option value="">All Resume Status</option>
-                    <option value="Updated">Updated</option>
-                    <option value="Not Updated">Not Updated</option>
-                </select>
-
-                <select value={attendanceFilter} onChange={e => setAttendanceFilter(e.target.value)}>
-                    <option value="">All Attendance</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Not Completed">Not Completed</option>
-                </select>
-
-                <select value={trainingFilter} onChange={e => setTrainingFilter(e.target.value)}>
-                    <option value="">All Training</option>
-                    <option value="Completed">Completed</option>
-                    <option value="In Progress">In Progress</option>
-                </select>
-            </div>
-
-            {/* 📥 CSV Button */}
-            <button onClick={generateReport} style={{ padding: '10px 20px', marginBottom: '20px' }}>
-                Generate Report (CSV)
-            </button>
-
-            {/* 🧾 Data Table */}
-            <table style={{ 
-                width: '80%', 
-                margin: '20px auto', 
-                borderCollapse: 'collapse', 
-                border: '2px solid white',
-                backgroundColor: 'black',
-                color: 'white'
-            }}>
-                <thead>
-                    <tr style={{ backgroundColor: '#000000ff' }}>
-                        <th>ID</th>
-                        <th>Name</th>
-                        <th>Resume Status</th>
-                        <th>Attendance</th>
-                        <th>Opportunities</th>
-                        <th>Training</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {filteredConsultants.map(c => (
-                        <tr key={c.id}>
-                            <td>{c.id}</td>
-                            <td>{c.name}</td>
-                            <td style={{ color: c.resume_status === 'Updated' ? 'green' : 'red' }}>
-                                {c.resume_status}
-                            </td>
-                            <td style={{ color: c.attendance === 'Completed' ? 'green' : 'red' }}>
-                                {c.attendance}
-                            </td>
-                            <td>{c.opportunities}</td>
-                            <td style={{ color: c.training === 'Completed' ? 'green' : 'orange' }}>
-                                {c.training}
-                            </td>
-                        </tr>
+    const renderConsultantTable = (data, isNotMatchingList = false) => (
+        <TableContainer>
+            <Table>
+                <TableHead>
+                    <TableRow>
+                        <TableCell>Name</TableCell>
+                        <TableCell>Match Score</TableCell>
+                        <TableCell>Current Training</TableCell>
+                        {isNotMatchingList && <TableCell>Actions</TableCell>}
+                    </TableRow>
+                </TableHead>
+                <TableBody>
+                    {data.map(c => (
+                        <TableRow key={c.id}>
+                            <TableCell>{c.name}</TableCell>
+                            <TableCell>{(c.match_score * 100).toFixed(0)}%</TableCell>
+                            <TableCell>{c.training}</TableCell>
+                            {isNotMatchingList && (
+                                <TableCell>
+                                    <Tooltip title={`Assign training for: "${searchQuery}"`}>
+                                        <IconButton onClick={() => handleAssignTraining(c.id)}>
+                                            <SchoolIcon />
+                                        </IconButton>
+                                    </Tooltip>
+                                </TableCell>
+                            )}
+                        </TableRow>
                     ))}
-                </tbody>
-            </table>
-        </div>
+                </TableBody>
+            </Table>
+        </TableContainer>
+    );
+
+    return (
+        <Box sx={{ p: 3 }}>
+            <Typography variant="h4" gutterBottom>Admin Dashboard</Typography>
+            <Paper>
+                <Tabs value={currentTab} onChange={handleTabChange} centered>
+                    <Tab label="AI Shortlisting" />
+                    <Tab label="All Consultants" />
+                </Tabs>
+                {currentTab === 0 && (
+                    <Box sx={{ p: 2 }}>
+                        <Typography variant="h6">Find the Right Consultant</Typography>
+                        <TextField
+                            fullWidth
+                            label="Describe the skills you need (e.g., 'experience with cloud services and backend databases')"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            sx={{ my: 2 }}
+                        />
+                        <Button variant="contained" onClick={handleShortlist}>Shortlist</Button>
+
+                        {shortlistResult && (
+                            <Box sx={{ mt: 3 }}>
+                                <Tabs value={listTab} onChange={handleListTabChange} centered>
+                                    <Tab label={`Matching (${shortlistResult.matching.length})`} />
+                                    <Tab label={`Not Matching (${shortlistResult.not_matching.length})`} />
+                                </Tabs>
+                                {listTab === 0 && renderConsultantTable(shortlistResult.matching)}
+                                {listTab === 1 && renderConsultantTable(shortlistResult.not_matching, true)}
+                            </Box>
+                        )}
+                    </Box>
+                )}
+                {/* ... other tabs like 'All Consultants' and 'Leave Requests' can remain ... */}
+            </Paper>
+        </Box>
     );
 };
 

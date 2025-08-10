@@ -1,172 +1,66 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { ThemeProvider, createTheme, CssBaseline, AppBar, Toolbar, Typography, Button, Box, IconButton } from '@mui/material';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
 import ConsultantDashboard from './components/ConsultantDashboard';
 import AdminDashboard from './components/AdminDashboard';
-// The theme imports are fully removed.
-import { FiMenu } from 'react-icons/fi';
-import { FaUserTie, FaShieldAlt } from 'react-icons/fa';
+import Login from './components/Login';
 
-// We removed the ThemeProvider wrapper, so this component is now the main one.
 const App = () => {
     const [view, setView] = useState('home');
-    const [menuOpen, setMenuOpen] = useState(false);
-    // REMOVED: const { darkMode, toggleTheme } = useTheme();
+    const [loggedInConsultant, setLoggedInConsultant] = useState(null);
+    const [mode, setMode] = useState('dark'); // 'dark' or 'light'
+
+    const theme = useMemo(() => createTheme({
+        palette: {
+            mode,
+        },
+    }), [mode]);
 
     const handleNavigation = (target) => {
+        if (target === 'home') {
+            setLoggedInConsultant(null);
+        }
         setView(target);
-        setMenuOpen(false);
+    };
+    
+    const handleLoginSuccess = (consultantData) => {
+        setLoggedInConsultant(consultantData);
+        setView('consultant');
     };
 
     return (
-        <div
-            style={{
-                minHeight: '100vh',
-                // CHANGED: Hardcoded to a light theme
-                backgroundColor: '#f8f9fa',
-                color: '#000000',
-                transition: 'all 0.3s ease'
-            }}
-        >
-            {/* Navbar */}
-            <header
-                style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '10px 20px',
-                    // CHANGED: Hardcoded to a light theme
-                    borderBottom: '1px solid #ddd'
-                }}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <FiMenu
-                        size={24}
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => setMenuOpen(!menuOpen)}
-                    />
-                    <span style={{ fontWeight: 'bold', fontSize: '18px' }}>Hexaware</span>
-                </div>
-                {/* REMOVED: The theme toggle button (sun/moon icon) is gone. */}
-            </header>
-
-            {/* Hamburger Menu */}
-            {menuOpen && (
-                <div
-                    style={{
-                        position: 'absolute',
-                        top: '50px',
-                        left: '10px',
-                        // CHANGED: Hardcoded to a light theme
-                        background: '#ffffff',
-                        border: '1px solid #ddd',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-                        zIndex: 1000,
-                        padding: '10px',
-                        width: '200px'
-                    }}
-                >
-                    <div style={{ padding: '10px', cursor: 'pointer' }} onClick={() => handleNavigation('home')}>
-                        Home
-                    </div>
-                    <div style={{ padding: '10px', cursor: 'pointer' }} onClick={() => handleNavigation('consultant')}>
-                        Consultant Dashboard
-                    </div>
-                    <div style={{ padding: '10px', cursor: 'pointer' }} onClick={() => handleNavigation('admin')}>
-                        Admin Dashboard
-                    </div>
-                </div>
-            )}
-
-            {/* Main Content */}
-            {view === 'home' && (
-                <main style={{ textAlign: 'center', padding: '40px 20px' }}>
-                    <div
-                        style={{
-                            display: 'inline-block',
-                            padding: '5px 15px',
-                            // CHANGED: Hardcoded to a light theme
-                            background: '#e9ecef',
-                            borderRadius: '20px',
-                            fontSize: '12px',
-                            marginBottom: '10px'
-                        }}
-                    >
-                        Enterprise Solution
-                    </div>
-                    <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '10px' }}>
-                        Consultant Management System
-                    </h1>
-                    <p
-                        style={{
-                            maxWidth: '600px',
-                            margin: '0 auto',
-                            fontSize: '16px',
-                            // CHANGED: Hardcoded to a light theme
-                            color: '#555555'
-                        }}
-                    >
-                        Streamline your consultant operations with our comprehensive management platform. Access powerful dashboards, manage resources, and optimize your workforce efficiency.
-                    </p>
-
-                    <div
-                        style={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            gap: '20px',
-                            marginTop: '30px',
-                            flexWrap: 'wrap'
-                        }}
-                    >
-                        {/* Consultant Card */}
-                        <div
-                            style={{
-                                // CHANGED: Hardcoded to a light theme
-                                background: '#ffffff',
-                                borderRadius: '10px',
-                                padding: '20px',
-                                width: '280px',
-                                textAlign: 'center',
-                                border: '1px solid #ddd'
-                            }}
-                        >
-                            <FaUserTie size={40} color="#4e73df" style={{ marginBottom: '10px' }} />
-                            <h3 style={{ marginBottom: '5px' }}>Consultant Portal</h3>
-                            <p style={{ fontSize: '14px', color: '#666666' }}>
-                                View assignments, track progress, manage availability, and access resources tailored for consultants.
-                            </p>
-                            <button onClick={() => setView('consultant')} style={{ marginTop: '15px', background: '#4e73df', color: '#fff', padding: '12px 20px', border: 'none', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', width: '100%' }}>
-                                Access Consultant Dashboard
-                            </button>
-                        </div>
-
-                        {/* Admin Card */}
-                        <div
-                            style={{
-                                // CHANGED: Hardcoded to a light theme
-                                background: '#ffffff',
-                                borderRadius: '10px',
-                                padding: '20px',
-                                width: '280px',
-                                textAlign: 'center',
-                                border: '1px solid #ddd'
-                            }}
-                        >
-                            <FaShieldAlt size={40} color="#1cc88a" style={{ marginBottom: '10px' }} />
-                            <h3 style={{ marginBottom: '5px' }}>Admin Portal</h3>
-                            <p style={{ fontSize: '14px', color: '#666666' }}>
-                                Manage consultants, oversee projects, generate reports, and maintain full system control.
-                            </p>
-                            <button onClick={() => setView('admin')} style={{ marginTop: '15px', background: '#1cc88a', color: '#fff', padding: '12px 20px', border: 'none', borderRadius: '6px', fontSize: '14px', cursor: 'pointer', width: '100%' }}>
-                                Access Admin Dashboard
-                            </button>
-                        </div>
-                    </div>
-                </main>
-            )}
-
-            {view === 'consultant' && <ConsultantDashboard />}
-            {view === 'admin' && <AdminDashboard />}
-        </div>
+        <ThemeProvider theme={theme}>
+            <CssBaseline />
+            <AppBar position="static">
+                <Toolbar>
+                    <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+                        Hexaware Management
+                    </Typography>
+                    <Button color="inherit" onClick={() => handleNavigation('home')}>Home</Button>
+                    <Button color="inherit" onClick={() => handleNavigation('admin')}>Admin Portal</Button>
+                    <Button color="inherit" onClick={() => handleNavigation('consultant')}>Consultant Portal</Button>
+                    <IconButton sx={{ ml: 1 }} onClick={() => setMode(mode === 'light' ? 'dark' : 'light')} color="inherit">
+                        {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+                    </IconButton>
+                </Toolbar>
+            </AppBar>
+            <Box component="main">
+                {view === 'home' && (
+                    <Box sx={{ textAlign: 'center', p: 5 }}>
+                        <Typography variant="h3" gutterBottom>Welcome to the Management System</Typography>
+                    </Box>
+                )}
+                {view === 'admin' && <AdminDashboard />}
+                {view === 'consultant' && (
+                    !loggedInConsultant ? (
+                        <Login onLoginSuccess={handleLoginSuccess} />
+                    ) : (
+                        <ConsultantDashboard consultant={loggedInConsultant} />
+                    )
+                )}
+            </Box>
+        </ThemeProvider>
     );
 };
 

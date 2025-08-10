@@ -1,195 +1,137 @@
-import React, { useEffect, useState } from 'react';
-import StatusCard from './StatusCard'; // Assuming you have this component
+import React, { useState, useEffect } from 'react';
+import { Box, Typography, Paper, Grid, Button, TextField, Tabs, Tab, List, ListItem, ListItemText, Chip } from '@mui/material';
 
-const ConsultantDashboard = () => {
-    const [consultants, setConsultants] = useState([]);
-    const [selectedId, setSelectedId] = useState('');
-    const [selectedConsultant, setSelectedConsultant] = useState(null);
+const ConsultantDashboard = ({ consultant }) => {
+    const [currentConsultant, setCurrentConsultant] = useState(consultant);
+    const [currentTab, setCurrentTab] = useState(0);
+    
+    // Resume Analysis State
     const [resumeFile, setResumeFile] = useState(null);
-    const [uploadMessage, setUploadMessage] = useState('');
-    const [feedback, setFeedback] = useState('');
-
-    // State for the new local AI agent
-    const [keywords, setKeywords] = useState('Python, React, Flask, SQL, Leadership'); // Example keywords
+    const [keywords, setKeywords] = useState('Python, React, SQL');
     const [analysisResult, setAnalysisResult] = useState(null);
-
-    // REMOVED: All theme-related code (useTheme, darkMode) is gone.
-
-    const calculateProgress = (consultant) => {
-        if (!consultant) return 0;
-        let progress = 0;
-        if (consultant.resume_status === "Updated") progress += 25;
-        if (consultant.attendance === "Completed") progress += 25;
-        if (consultant.opportunities > 0) progress += 25;
-        if (consultant.training === "Completed") progress += 25;
-        return progress;
-    };
+    const [feedback, setFeedback] = useState('');
+    
+    // Leave Management State
+    const [leaveReason, setLeaveReason] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+    const [pastLeaves, setPastLeaves] = useState([]);
 
     useEffect(() => {
-        fetch('http://localhost:5000/consultants')
+        // Fetch past leave requests for this consultant
+        fetch(`http://localhost:5000/leave/requests/consultant/${consultant.id}`)
             .then(res => res.json())
-            .then(data => setConsultants(data));
-    }, []);
+            .then(data => setPastLeaves(data));
+    }, [consultant.id]);
 
-    const handleSelect = (e) => {
-        const id = e.target.value;
-        setSelectedId(id);
-        const consultant = consultants.find(c => c.id === parseInt(id));
-        setSelectedConsultant(consultant);
-        // Reset analysis when changing consultant
-        setAnalysisResult(null);
-        setUploadMessage('');
-        setFeedback('');
+    const handleTabChange = (event, newValue) => {
+        setCurrentTab(newValue);
     };
 
-    const updateConsultant = (field, value) => {
-        fetch(`http://localhost:5000/consultants/${selectedConsultant.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ [field]: value })
-        })
-        .then(res => res.json())
-        .then(data => {
-            // This part updates the UI immediately after a successful action
-            setSelectedConsultant(data);
-            const updatedList = consultants.map(c =>
-                c.id === data.id ? data : c
-            );
-            setConsultants(updatedList);
-        });
-    };
-
-    // This is the correct function to work with our local AI backend
     const handleResumeFileSubmit = () => {
-        if (!resumeFile) {
-            setUploadMessage("❌ Please select a file first.");
-            return;
-        }
-        if (!keywords.trim()) {
-            setUploadMessage("❌ Please enter some keywords to check for.");
-            return;
-        }
-
         const formData = new FormData();
         formData.append('file', resumeFile);
-        formData.append('keywords', keywords); // Add keywords to the request
+        formData.append('keywords', keywords);
 
-        setUploadMessage("✅ Analyzing resume...");
-        setAnalysisResult(null);
-        setFeedback('');
-
-        fetch('http://localhost:5000/upload_resume', { // Correct endpoint
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) {
-                setUploadMessage(`❌ Error: ${data.error}`);
-            } else {
-                setAnalysisResult(data); // Store the entire result object
-                setUploadMessage("✅ Analysis complete.");
-            }
-        })
-        .catch(err => {
-            setUploadMessage(`❌ Error: ${err.message}`);
-        });
+        fetch('http://localhost:5000/upload_resume', { method: 'POST', body: formData })
+            .then(res => res.json())
+            .then(data => setAnalysisResult(data));
     };
 
-    const generateFeedback = () => {
-        if (!analysisResult || !analysisResult.found_keywords) {
-            setFeedback('Cannot generate feedback without an analysis result.');
-            return;
-        }
-
-        fetch('http://localhost:5000/generate_feedback', { // Correct endpoint
+    const handleLeaveSubmit = (e) => {
+        e.preventDefault();
+        const leaveData = {
+            consultant_id: consultant.id,
+            start_date: startDate,
+            end_date: endDate,
+            reason: leaveReason
+        };
+        fetch('http://localhost:5000/leave/request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ found_keywords: analysisResult.found_keywords })
+            body: JSON.stringify(leaveData)
         })
         .then(res => res.json())
-        .then(data => {
-            setFeedback(data.feedback || 'No feedback generated.');
-        })
-        .catch(err => {
-            setFeedback(`❌ Error generating feedback: ${err.message}`);
+        .then(newLeave => {
+            setPastLeaves([...pastLeaves, newLeave]);
+            // Clear form
+            setLeaveReason('');
+            setStartDate('');
+            setEndDate('');
         });
     };
 
     return (
-        // Hardcoded to a light/black theme to match the rest of the app
-        <div style={{ padding: '20px', textAlign: 'center', backgroundColor: 'black', color: 'white', minHeight: '100vh' }}>
-            <h2>Consultant Dashboard</h2>
-            <select value={selectedId} onChange={handleSelect}>
-                <option value="">Select Consultant</option>
-                {consultants.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-            </select>
+        <Box sx={{ p: 3 }}>
+            <Typography variant="h4" gutterBottom>Welcome, {currentConsultant.name}</Typography>
+            <Tabs value={currentTab} onChange={handleTabChange} centered>
+                <Tab label="Resume Analysis" />
+                <Tab label="Leave Management" />
+            </Tabs>
 
-            {selectedConsultant && (
-                <div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', marginTop: '20px' }}>
-                        <StatusCard title="Resume Status" value={selectedConsultant.resume_status} color="blue" />
-                        <StatusCard title="Attendance" value={selectedConsultant.attendance} color="green" />
-                        <StatusCard title="Opportunities" value={selectedConsultant.opportunities} color="orange" />
-                        <StatusCard title="Training" value={selectedConsultant.training} color="purple" />
-                    </div>
-                    
-                    <div style={{ marginTop: '20px', display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '10px' }}>
-                         <button onClick={() => updateConsultant('resume_status', 'Updated')}>Mark Resume as Updated</button>
-                         <button onClick={() => updateConsultant('attendance', 'Completed')}>Mark Attendance as Completed</button>
-                         <button onClick={() => updateConsultant('opportunities', selectedConsultant.opportunities + 1)}>Add Opportunity</button>
-                         <button onClick={() => updateConsultant('training', 'Completed')}>Mark Training as Completed</button>
-                    </div>
-
-                    <div style={{ marginTop: '40px' }}>
-                        <h3>Upload & Analyze Resume</h3>
-                        <div>
-                            <label htmlFor="keywords">Keywords to look for (comma-separated):</label>
-                            <br />
-                            <input
-                                id="keywords"
-                                type="text"
-                                value={keywords}
-                                onChange={(e) => setKeywords(e.target.value)}
-                                style={{ width: '50%', padding: '8px', marginTop: '5px', marginBottom: '15px' }}
-                            />
-                        </div>
-
-                        <input type="file" accept=".pdf, .docx" onChange={(e) => setResumeFile(e.target.files[0])} />
-                        <br />
-                        <button onClick={handleResumeFileSubmit} style={{ marginTop: '10px', padding: '10px 15px' }}>
-                            Submit Resume for Analysis
-                        </button>
-                        <div style={{ marginTop: '10px', fontWeight: 'bold', color: uploadMessage.includes("❌") ? 'red' : 'green' }}>
-                            {uploadMessage}
-                        </div>
-
-                        {analysisResult && (
-                            <div style={{ marginTop: '20px', textAlign: 'left', display: 'inline-block', maxWidth: '600px', backgroundColor: '#e6f7ff', padding: '15px', borderRadius: '8px', color: 'black' }}>
-                                <h4>Analysis Result:</h4>
-                                <p><strong>Match Score:</strong> {analysisResult.match_score_percent}%</p>
-                                <p><strong>Found Keywords:</strong> {analysisResult.found_keywords.length > 0 ? analysisResult.found_keywords.join(', ') : 'None'}</p>
-                                
-                                <div style={{ marginTop: '15px', textAlign: 'center' }}>
-                                    <button onClick={generateFeedback} style={{ padding: '10px 20px' }}>
-                                        Generate Personalized Feedback
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {feedback && (
-                            <div style={{ backgroundColor: '#f0f0f0', padding: '15px', borderRadius: '8px', marginTop: '20px', textAlign: 'left', maxWidth: '600px', display: 'inline-block', color: 'black' }}>
-                                <strong>Personalized Feedback:</strong>
-                                <p>{feedback}</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
+            {currentTab === 0 && (
+                <Paper sx={{ p: 3, mt: 2 }}>
+                    <Typography variant="h6">Analyze Resume</Typography>
+                    <Grid container spacing={2} alignItems="center">
+                        <Grid item xs={12}>
+                            <TextField fullWidth label="Keywords (comma-separated)" value={keywords} onChange={(e) => setKeywords(e.target.value)} />
+                        </Grid>
+                        <Grid item xs={12}>
+                            <Button variant="contained" component="label">
+                                Upload Resume
+                                <input type="file" hidden onChange={(e) => setResumeFile(e.target.files[0])} />
+                            </Button>
+                            {resumeFile && <Typography sx={{ ml: 2, display: 'inline' }}>{resumeFile.name}</Typography>}
+                        </Grid>
+                        <Grid item xs={12}>
+                            <Button variant="contained" onClick={handleResumeFileSubmit} disabled={!resumeFile}>Analyze</Button>
+                        </Grid>
+                    </Grid>
+                    {analysisResult && (
+                        <Box sx={{ mt: 3 }}>
+                            <Typography variant="h6">Analysis Result</Typography>
+                            <Typography>Match Score: {analysisResult.match_score_percent}%</Typography>
+                            <Box>
+                                <Typography>Found Keywords:</Typography>
+                                {analysisResult.found_keywords.map(k => <Chip key={k} label={k} color="success" sx={{ mr: 1 }} />)}
+                            </Box>
+                            <Box sx={{ mt: 1 }}>
+                                <Typography>Skills Gap (Missing Keywords):</Typography>
+                                {analysisResult.missing_keywords.map(k => <Chip key={k} label={k} color="error" sx={{ mr: 1 }} />)}
+                            </Box>
+                        </Box>
+                    )}
+                </Paper>
             )}
-        </div>
+
+            {currentTab === 1 && (
+                <Grid container spacing={2} sx={{ mt: 2 }}>
+                    <Grid item xs={12} md={6}>
+                        <Paper sx={{ p: 3 }}>
+                            <Typography variant="h6">Request Leave</Typography>
+                            <Box component="form" onSubmit={handleLeaveSubmit}>
+                                <TextField fullWidth margin="normal" label="Start Date" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+                                <TextField fullWidth margin="normal" label="End Date" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} InputLabelProps={{ shrink: true }} />
+                                <TextField fullWidth margin="normal" label="Reason" multiline rows={3} value={leaveReason} onChange={e => setLeaveReason(e.target.value)} />
+                                <Button type="submit" variant="contained">Submit Request</Button>
+                            </Box>
+                        </Paper>
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                        <Paper sx={{ p: 3 }}>
+                            <Typography variant="h6">Past Requests</Typography>
+                            <List>
+                                {pastLeaves.map(req => (
+                                    <ListItem key={req.id}>
+                                        <ListItemText primary={`${req.start_date} to ${req.end_date}: ${req.reason}`} secondary={`Status: ${req.status}`} />
+                                    </ListItem>
+                                ))}
+                            </List>
+                        </Paper>
+                    </Grid>
+                </Grid>
+            )}
+        </Box>
     );
 };
 
