@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Grid, Button, TextField, Tabs, Tab, List, ListItem, ListItemText, Chip } from '@mui/material';
+import { Box, Typography, Paper, Grid, Button, TextField, Tabs, Tab, List, ListItem, ListItemText, Chip, Card, CardContent } from '@mui/material';
+
+const StatusCard = ({ title, value }) => (
+    <Grid item xs={12} sm={6} md={3}>
+        <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+                <Typography color="text.secondary" gutterBottom>{title}</Typography>
+                <Typography variant="h5" component="div">{value}</Typography>
+            </CardContent>
+        </Card>
+    </Grid>
+);
 
 const ConsultantDashboard = ({ consultant }) => {
     const [currentConsultant, setCurrentConsultant] = useState(consultant);
@@ -13,10 +24,12 @@ const ConsultantDashboard = ({ consultant }) => {
     const [pastLeaves, setPastLeaves] = useState([]);
 
     useEffect(() => {
-        fetch(`http://localhost:5000/leave/requests/consultant/${consultant.id}`)
-            .then(res => res.json())
-            .then(data => setPastLeaves(data));
+        fetch(`http://localhost:5000/leave/requests/consultant/${consultant.id}`).then(res => res.json()).then(setPastLeaves);
     }, [consultant.id]);
+    
+    useEffect(() => {
+        fetch(`http://localhost:5000/consultants/${consultant.id}`).then(res => res.json()).then(setCurrentConsultant);
+    }, []);
 
     const handleTabChange = (event, newValue) => setCurrentTab(newValue);
 
@@ -31,9 +44,7 @@ const ConsultantDashboard = ({ consultant }) => {
 
     const handleLeaveSubmit = (e) => {
         e.preventDefault();
-        const leaveData = {
-            consultant_id: consultant.id, start_date: startDate, end_date: endDate, reason: leaveReason
-        };
+        const leaveData = { consultant_id: consultant.id, start_date: startDate, end_date: endDate, reason: leaveReason };
         fetch('http://localhost:5000/leave/request', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(leaveData)
         })
@@ -48,10 +59,23 @@ const ConsultantDashboard = ({ consultant }) => {
         <Box sx={{ p: 3 }}>
             <Typography variant="h4" gutterBottom>Welcome, {currentConsultant.name}</Typography>
             <Tabs value={currentTab} onChange={handleTabChange} centered>
+                <Tab label="Overview" />
                 <Tab label="Resume Analysis" />
                 <Tab label="Leave Management" />
             </Tabs>
+
             {currentTab === 0 && (
+                <Box sx={{ mt: 3 }}>
+                    <Grid container spacing={3}>
+                        <StatusCard title="Resume Status" value={currentConsultant.resume_status} />
+                        <StatusCard title="Attendance" value={currentConsultant.attendance} />
+                        <StatusCard title="Opportunities" value={currentConsultant.opportunities} />
+                        <StatusCard title="Training" value={currentConsultant.training} />
+                    </Grid>
+                </Box>
+            )}
+
+            {currentTab === 1 && (
                 <Paper sx={{ p: 3, mt: 2 }}>
                     <Typography variant="h6">Analyze Resume</Typography>
                     <Grid container spacing={2} alignItems="center">
@@ -72,7 +96,8 @@ const ConsultantDashboard = ({ consultant }) => {
                     )}
                 </Paper>
             )}
-            {currentTab === 1 && (
+
+            {currentTab === 2 && (
                 <Grid container spacing={2} sx={{ mt: 2 }}>
                     <Grid item xs={12} md={6}>
                         <Paper sx={{ p: 3 }}>

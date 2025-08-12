@@ -1,202 +1,191 @@
 import os
+import requests
+import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from models import db, Consultant, LeaveRequest
 from ResumeAgent import local_resume_check, generate_local_feedback
 from datetime import datetime
 
-# --- AI IMPORTS ---
-from sentence_transformers import SentenceTransformer, util
-# Load a pre-trained sentence-transformer model (will download on first run)
-try:
-    ai_model = SentenceTransformer('all-MiniLM-L6-v2')
-except Exception as e:
-    print(f"Error loading SentenceTransformer model: {e}")
-    ai_model = None
-
+# --- SETUP ---
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
-
-# --- APP CONFIG AND DB SETUP ---
+CORS(app)
 UPLOAD_FOLDER = 'temp_uploads'
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+if not os.path.exists(UPLOAD_FOLDER): os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db.init_app(app)
 
-# --- ROBUST DATABASE INITIALIZATION WITH 10 CONSULTANTS ---
+# --- OLLAMA API CONFIGURATION ---
+OLLAMA_API_URL = "http://localhost:11434/api/embeddings"
+OLLAMA_MODEL = "nomic-embed-text"
+
+# --- DATABASE INITIALIZATION ---
 with app.app_context():
     db.create_all()
-    # This block now runs robustly to populate the DB if it's empty.
     if Consultant.query.count() == 0:
-        print("Database is empty. Populating with 10 sample consultants...")
-        
-        # The password for everyone is '1234'
+        print("Populating database with 10 sample consultants and dummy resumes...")
         hashed_password = generate_password_hash('1234', method='pbkdf2:sha256')
-        
-        consultant_names = [
-            "Arjun Kumar", "Sneha Sharma", "Ravi Singh", "Meena Patel", "Vikram Rathod",
-            "Priya Desai", "Amit Verma", "Anjali Mehta", "Rajesh Gupta", "Sunita Reddy"
+        consultants_data = [
+            {"name": "Arjun Kumar", "resume": "Experienced Python developer with skills in Flask, Django, and SQL databases. Worked on backend services and API development."},
+            {"name": "Sneha Sharma", "resume": "Frontend specialist with expertise in React, Redux, and modern CSS. Passionate about user interface design and performance optimization."},
+            {"name": "Ravi Singh", "resume": "Full-stack engineer proficient in JavaScript, Node.js, and Express. Also has experience with cloud deployment on AWS EC2 and S3."},
+            {"name": "Meena Patel", "resume": "Data Scientist skilled in Python, Pandas, and Scikit-learn. Experience in machine learning models and data visualization with Matplotlib."},
+            {"name": "Vikram Rathod", "resume": "DevOps engineer with a background in CI/CD pipelines using Jenkins and Docker. Manages cloud infrastructure on Microsoft Azure."},
+            {"name": "Priya Desai", "resume": "Quality Assurance tester with a focus on automated testing using Selenium and Cypress. Strong understanding of Agile methodologies."},
+            {"name": "Amit Verma", "resume": "Java developer with experience in Spring Boot and microservices architecture. Proficient with both SQL and NoSQL databases like MongoDB."},
+            {"name": "Anjali Mehta", "resume": "Project Manager with PMP certification. Expert in stakeholder communication, risk management, and leading Agile teams."},
+            {"name": "Rajesh Gupta", "resume": "Cybersecurity analyst focused on network security and vulnerability assessment. Familiar with tools like Wireshark and Metasploit."},
+            {"name": "Sunita Reddy", "resume": "Cloud architect specializing in AWS solutions, including Lambda, RDS, and ECS. Designs scalable and resilient cloud systems."}
         ]
-        
-        for name in consultant_names:
-            username = name.split(" ")[0].lower() # e.g., "Arjun Kumar" -> "arjun"
-            consultant = Consultant(
-                name=name,
-                username=username,
-                password_hash=hashed_password
-            )
+        for data in consultants_data:
+            username = data["name"].split(" ")[0].lower()
+            consultant = Consultant(name=data["name"], username=username, password_hash=hashed_password, resume_text=data["resume"])
             db.session.add(consultant)
-        
         db.session.commit()
-        print("Database populated successfully.")
+        print("Database populated.")
+
+# --- HELPER FUNCTIONS FOR OLLAMA ---
+def get_ollama_embedding(text):
+    try:
+        payload = {"model": OLLAMA_MODEL, "prompt": text}
+        response = requests.post(OLLAMA_API_URL, json=payload)
+        response.raise_for_status()
+        return response.json()["embedding"]
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling Ollama API: {e}")
+        return None
+
+def cosine_similarity(v1, v2):
+    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
 
 # --- API ENDPOINTS ---
 
-# --- THIS IS THE CRITICAL LOGIN ROUTE ---
+# --- LOGIN ENDPOINTS ---
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    password = request.json.get('password')
+    if password == "admin": return jsonify({"message": "Admin login successful"}), 200
+    return jsonify({"error": "Invalid admin password"}), 401
+
 @app.route("/login", methods=["POST"])
-def login():
+def consultant_login():
     data = request.json
-    username = data.get('username')
-    password = data.get('password')
-
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
-
+    username, password = data.get('username'), data.get('password')
     consultant = Consultant.query.filter_by(username=username.lower()).first()
-
     if consultant and check_password_hash(consultant.password_hash, password):
         return jsonify(consultant.to_dict())
-    else:
-        return jsonify({"error": "Invalid credentials"}), 401
+    return jsonify({"error": "Invalid credentials"}), 401
 
-# --- ALL OTHER ENDPOINTS ---
-
+# --- CONSULTANT CRUD ENDPOINTS ---
 @app.route("/consultants", methods=["GET"])
 def get_consultants():
-    consultants = Consultant.query.all()
-    return jsonify([c.to_dict() for c in consultants])
+    return jsonify([c.to_dict() for c in Consultant.query.all()])
+
+@app.route("/consultants/<int:id>", methods=["DELETE"])
+def delete_consultant(id):
+    consultant = Consultant.query.get_or_404(id)
+    db.session.delete(consultant)
+    db.session.commit()
+    return jsonify({"message": "Consultant deleted"})
+
+@app.route("/consultants", methods=["POST"])
+def add_consultant():
+    data = request.json
+    new_consultant = Consultant(name=data['name'], username=data['username'].lower(), password_hash=generate_password_hash(data.get('password', '1234')), resume_text=data.get('resume_text', ''))
+    db.session.add(new_consultant)
+    db.session.commit()
+    return jsonify(new_consultant.to_dict()), 201
 
 @app.route("/consultants/<int:id>", methods=["PUT"])
-def update_consultant(id):
+def update_consultant_details(id):
+    consultant = Consultant.query.get_or_404(id)
     data = request.json
-    consultant = Consultant.query.get(id)
-    if consultant:
-        consultant.resume_status = data.get("resume_status", consultant.resume_status)
-        consultant.attendance = data.get("attendance", consultant.attendance)
-        consultant.opportunities = data.get("opportunities", consultant.opportunities)
-        consultant.training = data.get("training", consultant.training)
-        db.session.commit()
-        return jsonify(consultant.to_dict())
-    return jsonify({"error": "Consultant not found"}), 404
+    consultant.name = data.get('name', consultant.name)
+    consultant.username = data.get('username', consultant.username).lower()
+    consultant.resume_text = data.get('resume_text', consultant.resume_text)
+    consultant.resume_status = data.get('resume_status', consultant.resume_status)
+    consultant.attendance = data.get('attendance', consultant.attendance)
+    consultant.opportunities = data.get('opportunities', consultant.opportunities)
+    consultant.training = data.get('training', consultant.training)
+    db.session.commit()
+    return jsonify(consultant.to_dict())
+
+# --- TRAINING ENDPOINTS ---
+@app.route("/consultants/<int:id>/assign_training", methods=["POST"])
+def assign_training(id):
+    consultant = Consultant.query.get_or_404(id)
+    consultant.training = f"Assigned: {request.json.get('skill')}"
+    db.session.commit()
+    return jsonify(consultant.to_dict())
+
+@app.route("/consultants/<int:id>/unassign_training", methods=["POST"])
+def unassign_training(id):
+    consultant = Consultant.query.get_or_404(id)
+    consultant.training = "Not Started"
+    db.session.commit()
+    return jsonify(consultant.to_dict())
+
+# --- AI & RESUME ENDPOINTS ---
+@app.route("/admin/shortlist", methods=["POST"])
+def admin_shortlist():
+    query = request.json.get('query')
+    if not query: return jsonify({"error": "Query is required"}), 400
+    query_embedding = get_ollama_embedding(query)
+    if query_embedding is None:
+        return jsonify({"error": "Could not connect to Ollama. Ensure Ollama is running."}), 503
+    consultants = Consultant.query.all()
+    results = []
+    for c in consultants:
+        doc_embedding = get_ollama_embedding(c.resume_text or "")
+        if doc_embedding:
+            score = cosine_similarity(query_embedding, doc_embedding)
+            results.append({'consultant': c.to_dict(), 'score': float(score)})
+    threshold = 0.6
+    matching = sorted([r for r in results if r['score'] > threshold], key=lambda x: x['score'], reverse=True)
+    not_matching = sorted([r for r in results if r['score'] <= threshold], key=lambda x: x['score'], reverse=True)
+    return jsonify({"matching": matching, "not_matching": not_matching})
 
 @app.route("/upload_resume", methods=["POST"])
 def upload_resume():
-    try:
-        if 'file' not in request.files: return jsonify({"error": "No file part"}), 400
-        file = request.files['file']
-        if file.filename == '': return jsonify({"error": "No selected file"}), 400
-        keyword_string = request.form.get('keywords', '')
-        if not keyword_string: return jsonify({"error": "No keywords provided"}), 400
-        required_keywords = {k.strip().lower() for k in keyword_string.split(',') if k.strip()}
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(temp_path)
-        result = local_resume_check(temp_path, list(required_keywords))
-        found_keywords_set = {k.lower() for k in result.get('found_keywords', [])}
-        missing_keywords = list(required_keywords - found_keywords_set)
-        result['missing_keywords'] = missing_keywords
-        os.remove(temp_path)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    if 'file' not in request.files: return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    keyword_string = request.form.get('keywords', '')
+    required_keywords = {k.strip().lower() for k in keyword_string.split(',') if k.strip()}
+    filename = secure_filename(file.filename)
+    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(temp_path)
+    result = local_resume_check(temp_path, list(required_keywords))
+    found_keywords_set = {k.lower() for k in result.get('found_keywords', [])}
+    result['missing_keywords'] = list(required_keywords - found_keywords_set)
+    os.remove(temp_path)
+    return jsonify(result)
 
-@app.route("/generate_feedback", methods=["POST"])
-def generate_feedback():
-    try:
-        data = request.json
-        found_keywords = data.get('found_keywords', [])
-        feedback = generate_local_feedback(found_keywords)
-        return jsonify({"feedback": feedback})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
+# --- LEAVE MANAGEMENT ENDPOINTS ---
 @app.route("/leave/request", methods=["POST"])
 def request_leave():
     data = request.json
-    consultant_id = data.get('consultant_id')
-    start_date = datetime.strptime(data.get('start_date'), '%Y-%m-%d')
-    end_date = datetime.strptime(data.get('end_date'), '%Y-%m-%d')
-    reason = data.get('reason')
-    if not all([consultant_id, start_date, end_date, reason]):
-        return jsonify({"error": "Missing required fields"}), 400
-    new_request = LeaveRequest(consultant_id=consultant_id, start_date=start_date, end_date=end_date, reason=reason)
+    new_request = LeaveRequest(consultant_id=data.get('consultant_id'), start_date=datetime.strptime(data.get('start_date'), '%Y-%m-%d'), end_date=datetime.strptime(data.get('end_date'), '%Y-%m-%d'), reason=data.get('reason'))
     db.session.add(new_request)
     db.session.commit()
     return jsonify(new_request.to_dict()), 201
 
-@app.route("/leave/requests", methods=["GET"])
-def get_all_leave_requests():
-    requests = LeaveRequest.query.all()
-    return jsonify([r.to_dict() for r in requests])
-    
+@app.route("/leave/requests/<int:request_id>", methods=["PUT"])
+def update_leave_request(request_id):
+    leave_request = LeaveRequest.query.get_or_404(request_id)
+    leave_request.status = request.json.get('status')
+    db.session.commit()
+    return jsonify(leave_request.to_dict())
+
 @app.route("/leave/requests/consultant/<int:consultant_id>", methods=["GET"])
 def get_consultant_leave_requests(consultant_id):
     requests = LeaveRequest.query.filter_by(consultant_id=consultant_id).all()
     return jsonify([r.to_dict() for r in requests])
 
-@app.route("/leave/requests/<int:request_id>", methods=["PUT"])
-def update_leave_request(request_id):
-    data = request.json
-    status = data.get('status')
-    leave_request = LeaveRequest.query.get(request_id)
-    if not leave_request:
-        return jsonify({"error": "Request not found"}), 404
-    leave_request.status = status
-    db.session.commit()
-    return jsonify(leave_request.to_dict())
-
-@app.route("/admin/shortlist", methods=["POST"])
-def admin_shortlist():
-    if ai_model is None:
-        return jsonify({"error": "AI model not loaded. Check backend console."}), 500
-    data = request.json
-    query = data.get('query')
-    if not query:
-        return jsonify({"error": "Query is required"}), 400
-    consultants = Consultant.query.all()
-    consultant_skill_summaries = [f"{c.name}: Skilled in {c.training} with a focus on {c.resume_status} tasks." for c in consultants]
-    query_embedding = ai_model.encode(query, convert_to_tensor=True)
-    consultant_embeddings = ai_model.encode(consultant_skill_summaries, convert_to_tensor=True)
-    cosine_scores = util.pytorch_cos_sim(query_embedding, consultant_embeddings)
-    matching_consultants = []
-    not_matching_consultants = []
-    threshold = 0.25
-    for i in range(len(consultants)):
-        consultant_data = consultants[i].to_dict()
-        consultant_data['match_score'] = round(cosine_scores[0][i].item(), 4)
-        if cosine_scores[0][i] > threshold:
-            matching_consultants.append(consultant_data)
-        else:
-            not_matching_consultants.append(consultant_data)
-    matching_consultants.sort(key=lambda x: x['match_score'], reverse=True)
-    not_matching_consultants.sort(key=lambda x: x['match_score'], reverse=True)
-    return jsonify({"matching": matching_consultants, "not_matching": not_matching_consultants})
-
-@app.route("/consultants/<int:id>/assign_training", methods=["POST"])
-def assign_training(id):
-    data = request.json
-    skill = data.get('skill')
-    consultant = Consultant.query.get(id)
-    if not consultant:
-        return jsonify({"error": "Consultant not found"}), 404
-    consultant.training = f"Assigned: {skill}"
-    db.session.commit()
-    return jsonify(consultant.to_dict())
-
+# --- FINAL APP RUN COMMAND ---
 if __name__ == '__main__':
-    app.run(debug=True)
+    # This host='0.0.0.0' is the final fix for the "Failed to fetch" error
+    app.run(host='0.0.0.0', port=5000, debug=True)
